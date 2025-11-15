@@ -256,7 +256,8 @@
             text-align: center;
             font-size: 0.9em;
         }
-
+        
+        /* CSS original para responsividade, garantindo ajuste no celular */
         @media (max-width: 968px) {
             .main-content {
                 grid-template-columns: 1fr;
@@ -355,7 +356,22 @@
 
             <div class="list-section">
                 <h2>Registros do Mês</h2>
-                <div id="registrosList"></div>
+                
+                <div class="form-group" style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <div style="flex: 1;">
+                        <label for="filtroBarbeiro">Filtrar Barbeiro:</label>
+                        <select id="filtroBarbeiro" onchange="mudarFiltroBarbeiro(this.value)">
+                            <option value="Todos">Todos</option>
+                            <option value="Diego">Diego</option>
+                            <option value="Junior">Junior</option>
+                            <option value="João">João</option>
+                        </select>
+                    </div>
+                    <div style="flex: 1; align-self: flex-end;">
+                        <button onclick="resetMensal()" class="btn-delete" style="width: 100%; height: 47px; margin-left: 0;">Zerar Mês</button>
+                    </div>
+                </div>
+                                <div id="registrosList"></div>
             </div>
         </div>
 
@@ -380,8 +396,19 @@
     </div>
 
     <script>
-        let registros = JSON.parse(localStorage.getItem('barbeariaPimenta')) || [];
+        // Variável que armazena todos os registros salvos
+        let todosRegistros = JSON.parse(localStorage.getItem('barbeariaPimenta')) || [];
+        
+        // Variável para armazenar os registros filtrados (exibidos na lista e usados para o cálculo dos totais)
+        let registrosExibidos = [];
+        
+        // Variáveis de Filtro
+        let filtroBarbeiro = 'Todos';
+        let filtroMes = new Date().getMonth(); // Padrão: Mês atual (0 a 11)
+        let filtroAno = new Date().getFullYear(); // Padrão: Ano atual
 
+        // --- Funções de Utilitário ---
+        
         function atualizarDataHora() {
             const agora = new Date();
             const opcoes = { 
@@ -401,10 +428,12 @@
         atualizarDataHora();
 
         function salvarRegistros() {
-            localStorage.setItem('barbeariaPimenta', JSON.stringify(registros));
+            localStorage.setItem('barbeariaPimenta', JSON.stringify(todosRegistros));
         }
 
         function formatarMoeda(valor) {
+            // Garante que o valor seja tratado como número
+            valor = parseFloat(valor) || 0;
             return new Intl.NumberFormat('pt-BR', {
                 style: 'currency',
                 currency: 'BRL'
@@ -422,6 +451,37 @@
             });
         }
 
+        // Função para mudar o filtro de barbeiro
+        function mudarFiltroBarbeiro(novoBarbeiro) {
+            filtroBarbeiro = novoBarbeiro;
+            aplicarFiltros();
+        }
+
+        // --- Funções de Lógica Principal ---
+        
+        function aplicarFiltros() {
+            const mesAtual = new Date().getMonth();
+            const anoAtual = new Date().getFullYear();
+
+            registrosExibidos = todosRegistros.filter(reg => {
+                const dataRegistro = new Date(reg.dataHora);
+                const mesRegistro = dataRegistro.getMonth();
+                const anoRegistro = dataRegistro.getFullYear();
+
+                // 1. Filtrar por Mês e Ano (apenas o mês e ano atual)
+                const filtroDeData = (mesRegistro === mesAtual && anoRegistro === anoAtual);
+
+                // 2. Filtrar por Barbeiro
+                const filtroDeBarbeiro = (filtroBarbeiro === 'Todos' || reg.barbeiro === filtroBarbeiro);
+
+                return filtroDeData && filtroDeBarbeiro;
+            });
+
+            // Re-renderiza a lista e recalcula os totais com os dados filtrados
+            renderizarRegistros();
+            calcularTotais();
+        }
+
         function calcularTotais() {
             const totais = {
                 geral: 0,
@@ -430,11 +490,19 @@
                 João: 0
             };
 
-            registros.forEach(reg => {
-                totais.geral += parseFloat(reg.valor);
-                totais[reg.barbeiro] += parseFloat(reg.valor);
+            // Calcula os totais apenas com os 'registrosExibidos' (os do mês atual e barbeiro filtrado)
+            registrosExibidos.forEach(reg => {
+                const valorNumerico = parseFloat(reg.valor);
+                if (!isNaN(valorNumerico)) {
+                    totais.geral += valorNumerico;
+                    // Garante que a chave do barbeiro existe antes de somar
+                    if (totais.hasOwnProperty(reg.barbeiro)) {
+                        totais[reg.barbeiro] += valorNumerico;
+                    }
+                }
             });
 
+            // Atualiza a exibição dos totais
             document.getElementById('totalMes').textContent = formatarMoeda(totais.geral);
             document.getElementById('totalDiego').textContent = formatarMoeda(totais.Diego);
             document.getElementById('totalJunior').textContent = formatarMoeda(totais.Junior);
@@ -444,39 +512,70 @@
         function renderizarRegistros() {
             const lista = document.getElementById('registrosList');
             
-            if (registros.length === 0) {
-                lista.innerHTML = '<div class="empty-state">Nenhum registro ainda. Adicione sua primeira venda!</div>';
+            if (registrosExibidos.length === 0) {
+                lista.innerHTML = '<div class="empty-state">Nenhum registro encontrado para o filtro atual.</div>';
                 return;
             }
 
-            lista.innerHTML = registros.map((reg, index) => `
-                <div class="registro-item">
-                    <div class="registro-info">
-                        <strong>${reg.cliente}</strong>
-                        <p>🪒 ${reg.servico} | 👤 ${reg.barbeiro}</p>
-                        <p>📅 ${formatarDataHora(reg.dataHora)}</p>
+            // Mapeia e reverte a lista para mostrar o mais recente primeiro
+            lista.innerHTML = registrosExibidos.map((reg, index) => {
+                // Encontrar o índice original no array todosRegistros para exclusão correta
+                const originalIndex = todosRegistros.findIndex(r => r.dataHora === reg.dataHora);
+                
+                return `
+                    <div class="registro-item">
+                        <div class="registro-info">
+                            <strong>${reg.cliente}</strong>
+                            <p>🪒 ${reg.servico} | 👤 ${reg.barbeiro}</p>
+                            <p>📅 ${formatarDataHora(reg.dataHora)}</p>
+                        </div>
+                        <div>
+                            <span class="valor">${formatarMoeda(reg.valor)}</span>
+                                                        <button class="btn-delete" onclick="deletarRegistro(${originalIndex})">🗑️</button>
+                        </div>
                     </div>
-                    <div>
-                        <span class="valor">${formatarMoeda(reg.valor)}</span>
-                        <button class="btn-delete" onclick="deletarRegistro(${index})">🗑️</button>
-                    </div>
-                </div>
-            `).reverse().join('');
-
-            calcularTotais();
+                `;
+            }).reverse().join('');
         }
 
-        function deletarRegistro(index) {
-            if (confirm('Tem certeza que deseja excluir este registro?')) {
-                registros.splice(index, 1);
+        function deletarRegistro(originalIndex) {
+            if (confirm('Tem certeza que deseja excluir este registro? Esta ação é irreversível.')) {
+                todosRegistros.splice(originalIndex, 1);
                 salvarRegistros();
-                renderizarRegistros();
+                aplicarFiltros(); // Recarrega os filtros e a lista
             }
         }
 
+        // Função de Reset Mensal (Limpa APENAS os registros do mês atual)
+        function resetMensal() {
+            const mesAtual = new Date().getMonth();
+            const anoAtual = new Date().getFullYear();
+
+            if (confirm(`ATENÇÃO! Você tem certeza que deseja APAGAR TODOS os ${registrosExibidos.length} registros de vendas do MÊS ATUAL?`)) {
+                
+                // Filtra os registros MANTENDO APENAS os que NÃO são do mês/ano atual
+                todosRegistros = todosRegistros.filter(reg => {
+                    const dataRegistro = new Date(reg.dataHora);
+                    return dataRegistro.getMonth() !== mesAtual || dataRegistro.getFullYear() !== anoAtual;
+                });
+                
+                salvarRegistros();
+                alert('Registros do mês atual apagados com sucesso! Totais zerados. ✅');
+                aplicarFiltros(); // Recarrega a lista (agora vazia) e totais (zerados)
+            }
+        }
+
+        // --- Event Listener do Formulário ---
+        
         document.getElementById('vendaForm').addEventListener('submit', function(e) {
             e.preventDefault();
 
+            const barbeiro = document.getElementById('barbeiro').value;
+            if (!barbeiro) {
+                alert('Por favor, selecione um Barbeiro! 👨‍🦱');
+                return;
+            }
+            
             const checkboxes = document.querySelectorAll('input[name="servico"]:checked');
             
             if (checkboxes.length === 0) {
@@ -487,22 +586,26 @@
             const servicosSelecionados = Array.from(checkboxes).map(cb => cb.value);
 
             const novoRegistro = {
-                barbeiro: document.getElementById('barbeiro').value,
-                cliente: document.getElementById('cliente').value,
+                barbeiro: barbeiro,
+                cliente: document.getElementById('cliente').value || 'Cliente Anônimo',
                 servico: servicosSelecionados.join(' + '),
-                valor: parseFloat(document.getElementById('valor').value),
+                valor: parseFloat(document.getElementById('valor').value) || 0,
                 dataHora: new Date().toISOString()
             };
 
-            registros.push(novoRegistro);
+            // Adiciona o novo registro ao array principal
+            todosRegistros.push(novoRegistro);
             salvarRegistros();
-            renderizarRegistros();
-
+            aplicarFiltros(); // Atualiza a lista e totais
+            
             this.reset();
             alert('Registro adicionado com sucesso! ✅');
         });
 
-        renderizarRegistros();
+        // --- Inicialização ---
+        
+        aplicarFiltros(); // Inicia carregando os registros do mês atual
     </script>
 </body>
 </html>
+
